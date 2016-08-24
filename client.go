@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,14 +21,13 @@ type FitocracyCredGrabber struct {
 	UserID    int
 }
 
-func extractCookieValue(cookies []*http.Cookie, name string, outValue interface{}) error {
+func extractCookieValue(cookies []*http.Cookie, name string) (string, error) {
 	for _, cookie := range cookies {
 		if cookie.Name == name {
-			outValue = cookie.Value
-			return nil
+			return cookie.Value, nil
 		}
 	}
-	return fmt.Errorf("Couldn't find %s cookie", name)
+	return "", fmt.Errorf("Couldn't find %s cookie", name)
 }
 
 func (f *FitocracyCredGrabber) Login(username, password string) error {
@@ -38,8 +38,7 @@ func (f *FitocracyCredGrabber) Login(username, password string) error {
 		return err
 	}
 
-	var token string
-	err = extractCookieValue(CSRFTokenResp.Cookies(), "csrftoken", &token)
+	token, err := extractCookieValue(CSRFTokenResp.Cookies(), "csrftoken")
 	if err != nil {
 		return err
 	}
@@ -52,6 +51,7 @@ func (f *FitocracyCredGrabber) Login(username, password string) error {
 	form.Set("is_username", "1")
 	form.Set("json", "1")
 
+	fmt.Printf("Req with csrf: %s\n\n", token)
 	// set csrftoken, content-type, and referer
 	req, err := http.NewRequest("POST", loginUrl, strings.NewReader(form.Encode()))
 	req.AddCookie(&http.Cookie{
@@ -72,8 +72,7 @@ func (f *FitocracyCredGrabber) Login(username, password string) error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("Bad statusCode: %d", resp.StatusCode)
 	}
-	var sessionID string
-	err = extractCookieValue(resp.Cookies(), "sessionid", &sessionID)
+	sessionID, err := extractCookieValue(resp.Cookies(), "sessionid")
 	if err != nil {
 		return err
 	}
@@ -83,6 +82,7 @@ func (f *FitocracyCredGrabber) Login(username, password string) error {
 		return err
 	}
 
+	fmt.Println("everything good?", resp.StatusCode)
 	// Get sessionID from it, save it and csrf to uh, something
 	f.UserID = fitUserID
 	f.Username = username
@@ -112,6 +112,43 @@ type FitGrabberClient struct {
 	SessionID string
 	CSRFToken string
 	UserID    int
+}
+
+var (
+	activityList = "https://www.fitocracy.com/get_user_activities/"
+	activity     = "https://www.fitocracy.com/_get_activity_history_json/?activity-id="
+)
+
+func (f *FitGrabberClient) GetActivityList() {
+	credentials, _ := f.Credentials.Credentials()
+	url := fmt.Sprintf(activityList+"%d/", credentials.FitocracyUser)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		// return err
+		return
+	}
+	req.Header.Add("Referer", "https://www.fitocracy.com") // Required
+	req.AddCookie(&http.Cookie{
+		Name:  "csrfmiddlewaretoken",
+		Value: credentials.CSRFToken,
+	})
+	req.AddCookie(&http.Cookie{
+		Name:  "sessionid",
+		Value: credentials.SessionID,
+	})
+
+	resp, err := f.HTTPClient.Do(req)
+	if err != nil {
+		fmt.Println("Error!", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error!", err)
+		return
+	}
+	fmt.Println("Body\n\n", string(body))
 }
 
 func NewFitGrabberClient(username, password string) (*FitGrabberClient, error) {
