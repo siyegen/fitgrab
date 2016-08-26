@@ -9,6 +9,16 @@ import (
 	"strings"
 )
 
+type LoginData struct {
+	FitocracyUser int
+	Username      string
+	SessionID     string
+	CSRFToken     string
+}
+
+var loginUrl = "https://www.fitocracy.com/accounts/login/"
+var tokenUrl = "https://www.fitocracy.com/"
+
 type CredGrabber interface {
 	Login(username, password string) error
 	Credentials() (*LoginData, error)
@@ -104,7 +114,7 @@ func (f *FitocracyCredGrabber) Credentials() (*LoginData, error) {
 	}, nil
 }
 
-type FitGrabberClient struct {
+type FitocracyClient struct {
 	HTTPClient  *http.Client
 	Credentials CredGrabber
 
@@ -119,9 +129,10 @@ var (
 	activity     = "https://www.fitocracy.com/_get_activity_history_json/?activity-id="
 )
 
-func (f *FitGrabberClient) GetActivityList() {
+func (f *FitocracyClient) GetActivity(id int) {
 	credentials, _ := f.Credentials.Credentials()
-	url := fmt.Sprintf(activityList+"%d/", credentials.FitocracyUser)
+	url := fmt.Sprintf(activity+"%d", id)
+	fmt.Println("url", url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		// return err
@@ -148,17 +159,51 @@ func (f *FitGrabberClient) GetActivityList() {
 		fmt.Println("Error!", err)
 		return
 	}
-	fmt.Println("Body\n\n", string(body))
+	if resp.StatusCode == 200 {
+		fmt.Println("Body\n\n", string(body))
+	}
 }
 
-func NewFitGrabberClient(username, password string) (*FitGrabberClient, error) {
+func (f *FitocracyClient) GetActivityList() (string, error) {
+	credentials, _ := f.Credentials.Credentials()
+	url := fmt.Sprintf(activityList+"%d/", credentials.FitocracyUser)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Add("Referer", "https://www.fitocracy.com") // Required
+	req.AddCookie(&http.Cookie{
+		Name:  "csrfmiddlewaretoken",
+		Value: credentials.CSRFToken,
+	})
+	req.AddCookie(&http.Cookie{
+		Name:  "sessionid",
+		Value: credentials.SessionID,
+	})
+
+	resp, err := f.HTTPClient.Do(req)
+	if err != nil {
+		fmt.Println("Error!", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error!", err)
+		return "", err
+	}
+	fmt.Println("Body\n\n", string(body))
+	return string(body), nil
+}
+
+func NewFitocracyClient(username, password string) (*FitocracyClient, error) {
 	credentials := &FitocracyCredGrabber{}
 	err := credentials.Login(username, password)
 	if err != nil {
 		return nil, err
 	}
 
-	return &FitGrabberClient{
+	return &FitocracyClient{
 		HTTPClient:  &http.Client{},
 		Credentials: credentials,
 	}, nil
