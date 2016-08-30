@@ -35,6 +35,7 @@ Grabs all the data for the named workout by Fitocracy id. Try this if name isn't
 - Create Fitgrabber object
 - create new method for it with optional parameters
 - common method for making calls, saving data
+- create .store to use for lookups
 
 ### TODO
 - Add date ranges to queries
